@@ -2,6 +2,25 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import datetime
+from groq import Groq  # Nayi library
+
+# --- AI SETUP ---
+# Hinglish: Yahan hum apni API key daalenge. 
+# Streamlit Cloud par ise 'Secrets' mein rakha jata hai.
+client = Groq(api_key="APNI_GROQ_API_KEY_YAHAN_DAALEIN") 
+
+def get_ai_advice(task_name, category):
+    try:
+        chat_completion = client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": "You are a Gen-AI Mentor. Give a 2-line practical study tip in Hinglish for the given topic."},
+                {"role": "user", "content": f"Topic: {task_name}, Roadmap Stage: {category}"}
+            ],
+            model="llama3-8b-8192",
+        )
+        return chat_completion.choices[0].message.content
+    except:
+        return "AI Coach abhi thoda busy hai, baad mein try karein!"
 
 # --- DATABASE SETUP ---
 def init_db():
@@ -9,89 +28,53 @@ def init_db():
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS tasks 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                  date TEXT, 
-                  task TEXT, 
-                  category TEXT, 
-                  status TEXT)''')
+                  date TEXT, task TEXT, category TEXT, status TEXT)''')
     conn.commit()
     conn.close()
 
 init_db()
 
-# Function to update task status
-# Hinglish: Ye function task ko 'Completed' mark karne ke liye hai
-def complete_task(task_id):
-    conn = sqlite3.connect('routine_tracker.db', check_same_thread=False)
-    c = conn.cursor()
-    c.execute("UPDATE tasks SET status = 'Completed' WHERE id = ?", (task_id,))
-    conn.commit()
-    conn.close()
+# --- APP UI ---
+st.set_page_config(page_title="Gen-AI Tracker + AI Coach", page_icon="🤖")
+st.title("🤖 Gen-AI Smart Tracker")
 
-# --- APP CONFIG ---
-st.set_page_config(page_title="Gen-AI Tracker Pro", page_icon="✅")
+# Sidebar
+st.sidebar.title("Settings")
+user_api_key = st.sidebar.text_input("Enter Groq API Key:", type="password")
+if user_api_key:
+    client = Groq(api_key=user_api_key)
 
-# --- SIDEBAR ---
-st.sidebar.title("🚀 Roadmap Progress")
-roadmap_steps = ["Step 0: Python", "Step 1: Basics", "Step 2: RAG/Agents", "Step 3: Deploy"]
-selected_step = st.sidebar.selectbox("Current Stage:", roadmap_steps)
-progress_val = st.sidebar.slider("Step Completion (%)", 0, 100, 20)
-st.sidebar.progress(progress_val)
+# Input Form
+with st.expander("➕ Naya Task Add Karein"):
+    t_name = st.text_input("Topic Name")
+    t_cat = st.selectbox("Stage:", ["Step 0: Python", "Step 1: Basics", "Step 2: RAG/Agents", "Step 3: Deploy"])
+    if st.button("Save"):
+        conn = sqlite3.connect('routine_tracker.db')
+        c = conn.cursor()
+        c.execute("INSERT INTO tasks (date, task, category, status) VALUES (?, ?, ?, ?)",
+                  (datetime.now().strftime("%Y-%m-%d"), t_name, t_cat, "Pending"))
+        conn.commit()
+        st.rerun()
 
-# --- MAIN UI ---
-st.title("📅 Smart Routine Tracker")
-
-# Form to add tasks
-with st.expander("➕ Naya Task Add Karein", expanded=True):
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        task_input = st.text_input("Topic Name")
-    with col2:
-        date_input = st.date_input("Target Date", datetime.now())
-    
-    if st.button("Save Task"):
-        if task_input:
-            conn = sqlite3.connect('routine_tracker.db', check_same_thread=False)
-            c = conn.cursor()
-            c.execute("INSERT INTO tasks (date, task, category, status) VALUES (?, ?, ?, ?)",
-                      (date_input.strftime("%Y-%m-%d"), task_input, selected_step, "Pending"))
-            conn.commit()
-            conn.close()
-            st.success("Task saved!")
-            st.rerun()
-
-# --- DISPLAY & COMPLETE TASKS ---
+# Display Tasks
 st.subheader("📑 Aapka Learning Log")
-
-conn = sqlite3.connect('routine_tracker.db', check_same_thread=False)
-df = pd.read_sql_query("SELECT * FROM tasks WHERE status = 'Pending' ORDER BY date ASC", conn)
-done_df = pd.read_sql_query("SELECT * FROM tasks WHERE status = 'Completed' ORDER BY date DESC", conn)
+conn = sqlite3.connect('routine_tracker.db')
+df = pd.read_sql_query("SELECT * FROM tasks WHERE status = 'Pending'", conn)
 conn.close()
 
-# Display Pending Tasks with 'Done' Button
-if not df.empty:
-    for index, row in df.iterrows():
-        col_t, col_b = st.columns([4, 1])
-        with col_t:
-            st.write(f"**{row['task']}** ({row['date']}) - *{row['category']}*")
-        with col_b:
-            if st.button("Done ✅", key=f"btn_{row['id']}"):
-                complete_task(row['id'])
-                st.toast(f"Shabaash! {row['task']} pura hua! 🎉")
-                st.rerun()
-else:
-    st.info("Koi Pending task nahi hai. Chill karein ya naya add karein!")
-
-# Show Completed Tasks
-if not done_df.empty:
-    with st.expander("✅ Completed Tasks (History)"):
-        st.table(done_df[['date', 'task', 'category']])
-
-# --- FOOTER ---
-st.divider()
-if st.button("Clear All Data"):
-    conn = sqlite3.connect('routine_tracker.db', check_same_thread=False)
-    c = conn.cursor()
-    c.execute("DELETE FROM tasks")
-    conn.commit()
-    conn.close()
-    st.rerun()
+for index, row in df.iterrows():
+    with st.container():
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.write(f"**{row['task']}**")
+        with col2:
+            if st.button("Get AI Tip 💡", key=f"ai_{row['id']}"):
+                advice = get_ai_advice(row['task'], row['category'])
+                st.info(advice)
+        
+        if st.button("Done ✅", key=f"done_{row['id']}"):
+            conn = sqlite3.connect('routine_tracker.db')
+            c = conn.cursor()
+            c.execute("UPDATE tasks SET status = 'Completed' WHERE id = ?", (row['id'],))
+            conn.commit()
+            st.rerun()
