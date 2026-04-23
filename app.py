@@ -4,7 +4,6 @@ import pandas as pd
 from datetime import datetime
 
 # --- DATABASE SETUP ---
-# Database initialize karne ka function
 def init_db():
     conn = sqlite3.connect('routine_tracker.db', check_same_thread=False)
     c = conn.cursor()
@@ -19,33 +18,33 @@ def init_db():
 
 init_db()
 
+# Function to update task status
+# Hinglish: Ye function task ko 'Completed' mark karne ke liye hai
+def complete_task(task_id):
+    conn = sqlite3.connect('routine_tracker.db', check_same_thread=False)
+    c = conn.cursor()
+    c.execute("UPDATE tasks SET status = 'Completed' WHERE id = ?", (task_id,))
+    conn.commit()
+    conn.close()
+
 # --- APP CONFIG ---
-st.set_page_config(page_title="Gen-AI Tracker", page_icon="🤖")
+st.set_page_config(page_title="Gen-AI Tracker Pro", page_icon="✅")
 
-# --- SIDEBAR: PROGRESS TRACKING ---
-st.sidebar.title("🚀 Gen-AI Roadmap")
-roadmap_steps = [
-    "Step 0: Python for AI",
-    "Step 1: Gen AI Basics",
-    "Step 2: Advanced AI (RAG/Agents)",
-    "Step 3: Deployment & Fine-tuning"
-]
+# --- SIDEBAR ---
+st.sidebar.title("🚀 Roadmap Progress")
+roadmap_steps = ["Step 0: Python", "Step 1: Basics", "Step 2: RAG/Agents", "Step 3: Deploy"]
 selected_step = st.sidebar.selectbox("Current Stage:", roadmap_steps)
-
-# Sidebar Progress Bar
-progress_val = st.sidebar.slider("Step Completion (%)", 0, 100, 10)
+progress_val = st.sidebar.slider("Step Completion (%)", 0, 100, 20)
 st.sidebar.progress(progress_val)
 
 # --- MAIN UI ---
-st.title("📅 Daily Routine Tracker")
-st.markdown(f"Goal: **{selected_step}** complete karna hai! 💪")
+st.title("📅 Smart Routine Tracker")
 
-# Input Form
-with st.container():
-    st.subheader("Naya Task Add Karein")
+# Form to add tasks
+with st.expander("➕ Naya Task Add Karein", expanded=True):
     col1, col2 = st.columns([2, 1])
     with col1:
-        task_input = st.text_input("Aaj ka topic (e.g. For Loops in Python)", placeholder="Yahan likhein...")
+        task_input = st.text_input("Topic Name")
     with col2:
         date_input = st.date_input("Target Date", datetime.now())
     
@@ -57,39 +56,42 @@ with st.container():
                       (date_input.strftime("%Y-%m-%d"), task_input, selected_step, "Pending"))
             conn.commit()
             conn.close()
-            st.success("Bahut badhiya! Task save ho gaya.")
-        else:
-            st.error("Pehle task ka naam toh likhiye!")
+            st.success("Task saved!")
+            st.rerun()
 
-# --- DISPLAY DATA ---
-st.divider()
+# --- DISPLAY & COMPLETE TASKS ---
 st.subheader("📑 Aapka Learning Log")
 
 conn = sqlite3.connect('routine_tracker.db', check_same_thread=False)
-df = pd.read_sql_query("SELECT id, date, task, category, status FROM tasks ORDER BY date DESC", conn)
+df = pd.read_sql_query("SELECT * FROM tasks WHERE status = 'Pending' ORDER BY date ASC", conn)
+done_df = pd.read_sql_query("SELECT * FROM tasks WHERE status = 'Completed' ORDER BY date DESC", conn)
 conn.close()
 
+# Display Pending Tasks with 'Done' Button
 if not df.empty:
-    # Task status update karne ka option
-    st.dataframe(df, use_container_width=True)
-    if st.button("Clear All History"):
-        conn = sqlite3.connect('routine_tracker.db', check_same_thread=False)
-        c = conn.cursor()
-        c.execute("DELETE FROM tasks")
-        conn.commit()
-        conn.close()
-        st.warning("Saara data delete ho gaya!")
-        st.rerun()
+    for index, row in df.iterrows():
+        col_t, col_b = st.columns([4, 1])
+        with col_t:
+            st.write(f"**{row['task']}** ({row['date']}) - *{row['category']}*")
+        with col_b:
+            if st.button("Done ✅", key=f"btn_{row['id']}"):
+                complete_task(row['id'])
+                st.toast(f"Shabaash! {row['task']} pura hua! 🎉")
+                st.rerun()
 else:
-    st.info("Abhi tak koi task add nahi kiya gaya hai.")
+    st.info("Koi Pending task nahi hai. Chill karein ya naya add karein!")
 
-# --- AI COACH TIP ---
+# Show Completed Tasks
+if not done_df.empty:
+    with st.expander("✅ Completed Tasks (History)"):
+        st.table(done_df[['date', 'task', 'category']])
+
+# --- FOOTER ---
 st.divider()
-st.subheader("🤖 AI Strategy Tip")
-tips = {
-    "Step 0: Python for AI": "💡 Tip: Rozana kam se kam 5 small programs banayein.",
-    "Step 1: Gen AI Basics": "💡 Tip: Prompt Engineering ke techniques (Few-shot) ko practical try karein.",
-    "Step 2: Advanced AI (RAG/Agents)": "💡 Tip: LangChain ya LlamaIndex ke documentation padhna shuru karein.",
-    "Step 3: Deployment & Fine-tuning": "💡 Tip: Apni app ko share karke feedback lein."
-}
-st.info(tips[selected_step])
+if st.button("Clear All Data"):
+    conn = sqlite3.connect('routine_tracker.db', check_same_thread=False)
+    c = conn.cursor()
+    c.execute("DELETE FROM tasks")
+    conn.commit()
+    conn.close()
+    st.rerun()
