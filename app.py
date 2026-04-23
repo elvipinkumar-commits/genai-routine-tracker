@@ -48,7 +48,7 @@ def get_ai_advice(task_name, category):
                 {"role": "system", "content": "You are a Gen-AI Mentor. Give a 2-line practical study tip in Hinglish."},
                 {"role": "user", "content": f"Topic: {task_name}, Stage: {category}"}
             ],
-            model="llama3-8b-8192",
+            model="llama-3.1-8b-instant",
         )
         return chat_completion.choices[0].message.content
     except Exception as e:
