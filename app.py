@@ -3,6 +3,9 @@ import sqlite3
 import pandas as pd
 from datetime import datetime
 from groq import Groq
+import PyPDF2  # PDF padhne ke liye
+import sys
+from io import StringIO
 
 # --- DATABASE SETUP ---
 def init_db():
@@ -16,81 +19,112 @@ def init_db():
 
 init_db()
 
-# --- APP UI ---
-st.set_page_config(page_title="Gen-AI Smart Tracker", page_icon="🤖")
-st.title("🤖 Gen-AI Smart Tracker")
+# --- PDF RAG LOGIC ---
+# Ye function PDF se roadmap padhega
+def get_roadmap_context():
+    try:
+        with open("roadmap.pdf", "rb") as f:
+            pdf_reader = PyPDF2.PdfReader(f)
+            text = ""
+            for page in pdf_reader.pages:
+                text += page.extract_text()
+            return text
+    except:
+        return "Roadmap PDF nahi mili. Step 0-3 follow karein."
 
-# 1. Sabse pehle Sidebar mein API input lete hain (taaki NameError na aaye)
-st.sidebar.title("Settings")
+# --- APP CONFIG ---
+st.set_page_config(page_title="Gen-AI Ultimate Tracker", layout="wide", page_icon="🚀")
+
+# --- SIDEBAR: SETTINGS & MOTIVATION ---
+st.sidebar.title("⚙️ AI Control Room")
 user_api_key = st.sidebar.text_input("Enter Groq API Key:", type="password")
 
-# 2. AI SETUP (Ab variable available hai)
-api_key_to_use = ""
-
-# Check if key is in Streamlit Secrets or Sidebar
-if "GROQ_API_KEY" in st.secrets:
-    api_key_to_use = st.secrets["GROQ_API_KEY"]
-elif user_api_key:
-    api_key_to_use = user_api_key
-
-# Initialize Groq client only if key exists
-if api_key_to_use:
-    client = Groq(api_key=api_key_to_use)
+if user_api_key:
+    client = Groq(api_key=user_api_key)
+    if st.sidebar.button("Aaj ki Motivation ✨"):
+        resp = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": "Give a 1-line motivational kick in Hinglish for a Gen-AI student."}]
+        )
+        st.sidebar.info(resp.choices[0].message.content)
 else:
     client = None
+    st.sidebar.warning("Pehle API Key daalein!")
 
-def get_ai_advice(task_name, category):
-    if not client:
-        return "Pehle Sidebar mein API Key daalein!"
-    try:
-        chat_completion = client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": "You are a Gen-AI Mentor. Give a 2-line practical study tip in Hinglish."},
-                {"role": "user", "content": f"Topic: {task_name}, Stage: {category}"}
-            ],
-            model="llama-3.1-8b-instant",
-        )
-        return chat_completion.choices[0].message.content
-    except Exception as e:
-        return f"API Error: {str(e)}"
+# --- MAIN INTERFACE ---
+st.title("🤖 Gen-AI Pro Learning Workspace")
 
-# --- MAIN FORM ---
-with st.expander("➕ Naya Task Add Karein"):
-    t_name = st.text_input("Topic Name")
-    t_cat = st.selectbox("Stage:", ["Step 0: Python", "Step 1: Basics", "Step 2: RAG/Agents", "Step 3: Deploy"])
-    if st.button("Save"):
-        if t_name:
-            conn = sqlite3.connect('routine_tracker.db')
-            c = conn.cursor()
-            c.execute("INSERT INTO tasks (date, task, category, status) VALUES (?, ?, ?, ?)",
-                      (datetime.now().strftime("%Y-%m-%d"), t_name, t_cat, "Pending"))
-            conn.commit()
-            st.rerun()
+tab1, tab2, tab3 = st.tabs(["📊 Daily Tracker", "💻 Code Playground", "📖 Roadmap AI Chat"])
+
+# --- TAB 1: TRACKER ---
+with tab1:
+    col_a, col_b = st.columns([1, 2])
+    with col_a:
+        st.subheader("Add New Task")
+        t_name = st.text_input("Topic Name", placeholder="e.g. RAG Basics")
+        t_cat = st.selectbox("Stage", ["Step 0: Python", "Step 1: Basics", "Step 2: Advanced", "Step 3: Deploy"])
+        if st.button("Save Task"):
+            if t_name:
+                conn = sqlite3.connect('routine_tracker.db')
+                c = conn.cursor()
+                c.execute("INSERT INTO tasks (date, task, category, status) VALUES (?, ?, ?, ?)",
+                          (datetime.now().strftime("%Y-%m-%d"), t_name, t_cat, "Pending"))
+                conn.commit()
+                st.rerun()
+
+    with col_b:
+        st.subheader("Pending Tasks")
+        conn = sqlite3.connect('routine_tracker.db')
+        df = pd.read_sql_query("SELECT * FROM tasks WHERE status = 'Pending'", conn)
+        for idx, row in df.iterrows():
+            c1, c2, c3 = st.columns([3, 1, 1])
+            c1.write(f"**{row['task']}**")
+            if c2.button("AI Tip 💡", key=f"tip_{row['id']}"):
+                if client:
+                    tip_resp = client.chat.completions.create(
+                        model="llama-3.1-8b-instant",
+                        messages=[{"role": "user", "content": f"Give a 2-line Hinglish tip for: {row['task']}"}]
+                    )
+                    st.info(tip_resp.choices[0].message.content)
+            if c3.button("Done ✅", key=f"done_{row['id']}"):
+                c.execute("UPDATE tasks SET status = 'Completed' WHERE id = ?", (row['id'],))
+                conn.commit()
+                st.rerun()
+        conn.close()
+
+# --- TAB 2: CODE PLAYGROUND ---
+with tab2:
+    st.subheader("🐍 Python Live Editor")
+    st.write("Apna code yahan likhein aur output dekhein:")
+    code = st.text_area("Code Editor:", value="print('Hello World')\na = 10\nb = 20\nprint(f'Sum is: {a+b}')", height=200)
+    if st.button("Run Code ▶️"):
+        try:
+            old_stdout = sys.stdout
+            redirected_output = sys.stdout = StringIO()
+            exec(code)
+            sys.stdout = old_stdout
+            st.success("Output:")
+            st.code(redirected_output.getvalue())
+        except Exception as e:
+            st.error(f"Error: {e}")
+
+# --- TAB 3: ROADMAP ASSISTANT (RAG) ---
+with tab3:
+    st.subheader("🧠 Roadmap Assistant")
+    st.write("AI aapke `roadmap.pdf` ke hisaab se jawab dega.")
+    user_ques = st.text_input("Apne roadmap ke baare mein puchiye (e.g. Agle mahine kya seekhna hai?)")
+    
+    if user_ques:
+        if client:
+            roadmap_text = get_roadmap_context()
+            rag_prompt = f"Using this Roadmap Content: {roadmap_text}\nAnswer the user: {user_ques}"
+            
+            with st.spinner("AI thinking..."):
+                resp = client.chat.completions.create(
+                    model="llama-3.1-8b-instant",
+                    messages=[{"role": "system", "content": "You are a Roadmap Expert. Answer in Hinglish based ONLY on the provided roadmap context."},
+                              {"role": "user", "content": rag_prompt}]
+                )
+                st.write("🤖 AI Mentor:", resp.choices[0].message.content)
         else:
-            st.warning("Task ka naam likhiye!")
-
-# --- DISPLAY TASKS ---
-st.subheader("📑 Aapka Learning Log")
-conn = sqlite3.connect('routine_tracker.db')
-df = pd.read_sql_query("SELECT * FROM tasks WHERE status = 'Pending' ORDER BY id DESC", conn)
-conn.close()
-
-for index, row in df.iterrows():
-    with st.container():
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            st.write(f"**{row['task']}** ({row['category']})")
-        with col2:
-            # AI Strategy Button
-            if st.button("Get AI Tip 💡", key=f"ai_{row['id']}"):
-                advice = get_ai_advice(row['task'], row['category'])
-                st.info(advice)
-        
-        # Done Button
-        if st.button("Done ✅", key=f"done_{row['id']}"):
-            conn = sqlite3.connect('routine_tracker.db')
-            c = conn.cursor()
-            c.execute("UPDATE tasks SET status = 'Completed' WHERE id = ?", (row['id'],))
-            conn.commit()
-            st.rerun()
-    st.divider()
+            st.error("Pehle Sidebar mein API key daalein!")
