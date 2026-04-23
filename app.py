@@ -5,22 +5,33 @@ from datetime import datetime
 from groq import Groq  # Nayi library
 
 # --- AI SETUP ---
-# Hinglish: Yahan hum apni API key daalenge. 
-# Streamlit Cloud par ise 'Secrets' mein rakha jata hai.
-client = Groq(api_key="APNI_GROQ_API_KEY_YAHAN_DAALEIN") 
+# Pehle Secrets se key dhoondo, nahi toh sidebar se lo
+api_key_to_use = ""
+
+if "GROQ_API_KEY" in st.secrets:
+    api_key_to_use = st.secrets["GROQ_API_KEY"]
+elif user_api_key:
+    api_key_to_use = user_api_key
+
+if api_key_to_use:
+    client = Groq(api_key=api_key_to_use)
+else:
+    client = None
 
 def get_ai_advice(task_name, category):
+    if not client:
+        return "Pehle Sidebar mein API Key daalein!"
     try:
         chat_completion = client.chat.completions.create(
             messages=[
-                {"role": "system", "content": "You are a Gen-AI Mentor. Give a 2-line practical study tip in Hinglish for the given topic."},
-                {"role": "user", "content": f"Topic: {task_name}, Roadmap Stage: {category}"}
+                {"role": "system", "content": "You are a Gen-AI Mentor. Give a 2-line practical study tip in Hinglish."},
+                {"role": "user", "content": f"Topic: {task_name}"}
             ],
             model="llama3-8b-8192",
         )
         return chat_completion.choices[0].message.content
-    except:
-        return "AI Coach abhi thoda busy hai, baad mein try karein!"
+    except Exception as e:
+        return f"Error: {str(e)}" # Ye line asli error batayegi
 
 # --- DATABASE SETUP ---
 def init_db():
